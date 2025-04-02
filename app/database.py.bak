@@ -2,7 +2,6 @@ import sqlite3
 import logging
 import json
 import uuid
-import threading
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -13,30 +12,21 @@ class Database:
     """
     Handles all database operations for the AI Agent.
     Uses SQLite for simplicity, but could be replaced with any database.
-    Thread-safe implementation with connection per thread.
     """
     
     def __init__(self, db_path: str = "planner.db"):
-        """Initialize database configuration and create tables if needed."""
+        """Initialize database connection and create tables if needed."""
         self.db_path = db_path
-        self.local = threading.local()
+        self.conn = sqlite3.connect(db_path)
+        self.conn.row_factory = sqlite3.Row
         
-        # Create tables using a temporary connection
-        self._get_connection()
+        # Create tables if they don't exist
         self._create_tables()
         logger.info(f"Database initialized at {db_path}")
     
-    def _get_connection(self):
-        """Get or create a thread-local database connection."""
-        if not hasattr(self.local, 'conn'):
-            self.local.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self.local.conn.row_factory = sqlite3.Row
-        return self.local.conn
-    
     def _create_tables(self) -> None:
         """Create necessary database tables if they don't exist."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         # Sessions table
         cursor.execute('''
@@ -115,7 +105,7 @@ class Database:
         )
         ''')
         
-        conn.commit()
+        self.conn.commit()
     
     def create_session(self, organizer_name: str, organizer_contact: str, 
                       event_name: str, created_at: datetime) -> str:
@@ -132,15 +122,14 @@ class Database:
             session_id: Unique identifier for the session
         """
         session_id = str(uuid.uuid4())
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         INSERT INTO sessions (id, organizer_name, organizer_contact, event_name, created_at)
         VALUES (?, ?, ?, ?, ?)
         ''', (session_id, organizer_name, organizer_contact, event_name, created_at))
         
-        conn.commit()
+        self.conn.commit()
         return session_id
     
     def add_participant(self, session_id: str, name: str, contact: str) -> str:
@@ -156,15 +145,14 @@ class Database:
             participant_id: Unique identifier for the participant
         """
         participant_id = str(uuid.uuid4())
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         INSERT INTO participants (id, session_id, name, contact)
         VALUES (?, ?, ?, ?)
         ''', (participant_id, session_id, name, contact))
         
-        conn.commit()
+        self.conn.commit()
         return participant_id
     
     def get_session(self, session_id: str) -> Dict[str, Any]:
@@ -177,8 +165,7 @@ class Database:
         Returns:
             session: Dictionary with session information
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM sessions WHERE id = ?', (session_id,))
         row = cursor.fetchone()
         
@@ -196,8 +183,7 @@ class Database:
         Returns:
             participants: List of dictionaries with participant information
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM participants WHERE session_id = ?', (session_id,))
         rows = cursor.fetchall()
         
@@ -213,8 +199,7 @@ class Database:
         Returns:
             participant: Dictionary with participant information
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM participants WHERE id = ?', (participant_id,))
         row = cursor.fetchone()
         
@@ -232,8 +217,7 @@ class Database:
         Returns:
             contact: Participant's contact information
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT contact FROM participants WHERE id = ?', (participant_id,))
         row = cursor.fetchone()
         
@@ -249,8 +233,7 @@ class Database:
             participant_id: The participant identifier
             method: Preferred method (sms, email, phone)
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         UPDATE participants
@@ -258,7 +241,7 @@ class Database:
         WHERE id = ?
         ''', (method, participant_id))
         
-        conn.commit()
+        self.conn.commit()
     
     def get_preferred_comm_method(self, participant_id: str) -> str:
         """
@@ -270,8 +253,7 @@ class Database:
         Returns:
             method: Preferred communication method
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT preferred_comm_method FROM participants WHERE id = ?', (participant_id,))
         row = cursor.fetchone()
         
@@ -291,15 +273,14 @@ class Database:
             question_id: Unique identifier for the question
         """
         question_id = str(uuid.uuid4())
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         INSERT INTO questions (id, participant_id, question_text, created_at)
         VALUES (?, ?, ?, ?)
         ''', (question_id, participant_id, question_text, datetime.now()))
         
-        conn.commit()
+        self.conn.commit()
         return question_id
     
     def store_preference_response(self, participant_id: str, question_id: str, 
@@ -316,15 +297,14 @@ class Database:
             response_id: Unique identifier for the response
         """
         response_id = str(uuid.uuid4())
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         INSERT INTO responses (id, participant_id, question_id, response_text, created_at)
         VALUES (?, ?, ?, ?, ?)
         ''', (response_id, participant_id, question_id, response_text, datetime.now()))
         
-        conn.commit()
+        self.conn.commit()
         return response_id
     
     def get_question_count(self, participant_id: str) -> int:
@@ -337,8 +317,7 @@ class Database:
         Returns:
             count: Number of questions asked
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT COUNT(*) as count FROM questions WHERE participant_id = ?', (participant_id,))
         row = cursor.fetchone()
         
@@ -352,8 +331,7 @@ class Database:
             participant_id: The participant identifier
             awaiting: Whether they are awaiting a continuation decision
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         UPDATE participants
@@ -361,7 +339,7 @@ class Database:
         WHERE id = ?
         ''', (1 if awaiting else 0, participant_id))
         
-        conn.commit()
+        self.conn.commit()
     
     def is_awaiting_continuation(self, participant_id: str) -> bool:
         """
@@ -373,8 +351,7 @@ class Database:
         Returns:
             awaiting: Whether they are awaiting a continuation decision
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT awaiting_continuation FROM participants WHERE id = ?', (participant_id,))
         row = cursor.fetchone()
         
@@ -387,8 +364,7 @@ class Database:
         Args:
             participant_id: The participant identifier
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         UPDATE participants
@@ -396,7 +372,7 @@ class Database:
         WHERE id = ?
         ''', (participant_id,))
         
-        conn.commit()
+        self.conn.commit()
     
     def is_preference_collection_complete(self, participant_id: str) -> bool:
         """
@@ -408,8 +384,7 @@ class Database:
         Returns:
             complete: Whether preference collection is complete
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT preferences_complete FROM participants WHERE id = ?', (participant_id,))
         row = cursor.fetchone()
         
@@ -425,8 +400,7 @@ class Database:
         Returns:
             responses: List of dictionaries with question and response information
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('''
         SELECT q.id as question_id, q.question_text, r.id as response_id, r.response_text
         FROM questions q
@@ -450,15 +424,14 @@ class Database:
             plan_id: Unique identifier for the plan
         """
         plan_id = str(uuid.uuid4())
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         INSERT INTO plans (id, session_id, plan_data, created_at)
         VALUES (?, ?, ?, ?)
         ''', (plan_id, session_id, json.dumps(plan), datetime.now()))
         
-        conn.commit()
+        self.conn.commit()
         return plan_id
     
     def get_plan(self, plan_id: str) -> Dict[str, Any]:
@@ -471,8 +444,7 @@ class Database:
         Returns:
             plan: Dictionary containing the plan details
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM plans WHERE id = ?', (plan_id,))
         row = cursor.fetchone()
         
@@ -492,8 +464,7 @@ class Database:
         Returns:
             plan: Dictionary containing the plan details
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('''
         SELECT * FROM plans 
         WHERE session_id = ? 
@@ -517,8 +488,7 @@ class Database:
             status: New status (pending, approved, rejected)
             feedback: Optional feedback about the status change
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         UPDATE plans
@@ -526,7 +496,7 @@ class Database:
         WHERE id = ?
         ''', (status, feedback, plan_id))
         
-        conn.commit()
+        self.conn.commit()
     
     def get_latest_approved_plan_id(self, session_id: str) -> str:
         """
@@ -538,8 +508,7 @@ class Database:
         Returns:
             plan_id: Identifier of the most recent approved plan
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('''
         SELECT id FROM plans 
         WHERE session_id = ? AND status = 'approved'
@@ -565,15 +534,14 @@ class Database:
             feedback_id: Unique identifier for the feedback record
         """
         feedback_id = str(uuid.uuid4())
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         
         cursor.execute('''
         INSERT INTO plan_feedback (id, participant_id, plan_id, accepted, feedback, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
         ''', (feedback_id, participant_id, plan_id, 1 if accepted else 0, feedback, datetime.now()))
         
-        conn.commit()
+        self.conn.commit()
         return feedback_id
     
     def get_plan_feedback(self, plan_id: str) -> List[Dict[str, Any]]:
@@ -586,8 +554,7 @@ class Database:
         Returns:
             feedback: List of dictionaries with feedback information
         """
-        conn = self._get_connection()
-        cursor = conn.cursor()
+        cursor = self.conn.cursor()
         cursor.execute('''
         SELECT pf.*, p.name as participant_name
         FROM plan_feedback pf
@@ -601,6 +568,5 @@ class Database:
     
     def close(self) -> None:
         """Close the database connection."""
-        if hasattr(self.local, 'conn'):
-            self.local.conn.close()
-            delattr(self.local, 'conn')
+        if self.conn:
+            self.conn.close()

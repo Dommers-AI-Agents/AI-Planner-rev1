@@ -6,10 +6,10 @@ This guide explains how to use and deploy the Group Activity Planning AI Agent s
 
 The Group Activity Planning AI Agent helps organize activities by:
 
-1. Reaching out to participants to collect their preferences 
+1. Reaching out to participants with a link to a web interface to collect their preferences 
 2. Analyzing everyone's preferences to create an optimal plan
-3. Getting approval from the organizer
-4. Sharing the plan with all participants and collecting feedback
+3. Getting approval from the organizer via the web interface
+4. Sharing the plan with all participants and collecting feedback through the web interface
 5. Handling any necessary plan revisions
 
 ## System Requirements
@@ -25,8 +25,8 @@ The Group Activity Planning AI Agent helps organize activities by:
 To fully utilize the system, you'll need:
 
 - Anthropic API key for Claude (for the AI agent)
-- Twilio account for SMS and voice calls
-- SendGrid or similar for email communications
+- Twilio account for SMS notifications (initial contact and updates)
+- SendGrid or similar for email notifications
 
 ## Installation
 
@@ -62,6 +62,7 @@ TWILIO_AUTH_TOKEN=your_twilio_auth_token
 TWILIO_PHONE_NUMBER=your_twilio_phone_number
 SENDGRID_API_KEY=your_sendgrid_api_key
 FROM_EMAIL=your_email@example.com
+BASE_URL=https://your-planner-domain.com
 ```
 
 ### 4. Configure your domain and SSL
@@ -102,7 +103,7 @@ curl -X POST http://localhost:8000/sessions \
 
 This will:
 1. Create a new planning session
-2. Automatically reach out to participants asking for their preferred communication method
+2. Automatically send participants a link to the web interface for collecting preferences
 3. Begin the preference collection process
 
 ### Check Session Status
@@ -121,25 +122,28 @@ curl -X POST http://localhost:8000/plans/generate/YOUR_SESSION_ID
 
 This will:
 1. Generate a plan based on collected preferences
-2. Send the plan to the organizer for approval
+2. Send the plan to the organizer for approval via the web interface
 
 ### Additional Endpoints
 
 The API provides several other endpoints for specific operations:
 
-- `/preferences/comm-method` - Process communication preference
-- `/preferences/response` - Process question responses
+- `/preferences/comm-method` - Process communication preference for notifications
+- `/preferences/response` - Process question responses from the web interface
+- `/preferences/complete` - Mark preference collection as complete
+- `/participant/questions` - Get all questions for a participant
+- `/participant/send-reminder` - Send reminder to a participant
 - `/plans/organizer-decision` - Record organizer's decision
 - `/plans/participant-feedback` - Record participant feedback
 
-## Handling Incoming Messages
+## Web Interface URLs
 
-The system provides webhook endpoints for handling responses from participants:
+The system provides web interfaces for both organizers and participants:
 
-- `/webhook/sms` - For SMS responses via Twilio
-- `/webhook/email` - For email responses
+- Organizer Dashboard: `https://your-domain.com/organizer?session_id=YOUR_SESSION_ID`
+- Participant Interface: `https://your-domain.com/participant?session_id=YOUR_SESSION_ID&participant_id=YOUR_PARTICIPANT_ID`
 
-You'll need to configure your Twilio and email services to forward responses to these endpoints.
+These links are automatically generated and sent to the respective users.
 
 ## Customization
 
@@ -169,7 +173,7 @@ docker-compose logs -f
 
 1. **API Key Issues**: Ensure all API keys in .env file are correct and have necessary permissions.
 
-2. **SMS/Voice not working**: Verify your Twilio phone number is properly configured for both SMS and voice capabilities.
+2. **SMS/Email not being sent**: Verify your Twilio and SendGrid configurations.
 
 3. **Database Errors**: Check that the data directory has proper write permissions.
 

@@ -42,6 +42,8 @@ class PreferenceCollector:
                                      response: str) -> None:
         """
         Process a participant's response about their preferred communication method.
+        This is now primarily used for reminder notifications, as the main interaction
+        happens through the web interface.
         
         Args:
             session_id: The planning session identifier
@@ -56,8 +58,6 @@ class PreferenceCollector:
             method = "sms"
         elif response in ["2", "email", "e-mail", "mail"]:
             method = "email"
-        elif response in ["3", "phone", "call", "voice"]:
-            method = "phone"
         else:
             # If response is unclear, default to the method they used to respond
             contact_info = self.db.get_participant_contact(participant_id)
@@ -67,13 +67,13 @@ class PreferenceCollector:
         # Store the preferred method
         self.db.set_preferred_comm_method(participant_id, method)
         
-        # Send first question
-        self._send_next_question(session_id, participant_id)
+        # Since we're now using a web interface, we don't send individual questions
+        # The questions will be available on the web interface all at once
     
     def process_question_response(self, session_id: str, participant_id: str, 
                                  question_id: str, response: str) -> None:
         """
-        Process a participant's response to a preference question.
+        Process a participant's response to a preference question from the web interface.
         
         Args:
             session_id: The planning session identifier
@@ -85,64 +85,45 @@ class PreferenceCollector:
         self.db.store_preference_response(participant_id, question_id, response)
         
         # Get current question count for this participant
+        # This is still tracked to understand how many questions have been answered
         question_count = self.db.get_question_count(participant_id)
         
-        if question_count >= 5:
-            # Ask if they want to continue or stop
-            participant = self.db.get_participant(participant_id)
-            message = (
-                "Thank you for your responses so far! Would you be willing to answer "
-                "a few more questions to help plan the perfect event? Reply with YES "
-                "to continue or NO to finish."
-            )
-            self.comm_handler.send_question(
-                participant_id=participant_id,
-                contact=participant['contact'],
-                method=self.db.get_preferred_comm_method(participant_id),
-                question=message
-            )
-            # Mark as awaiting continuation decision
-            self.db.set_awaiting_continuation(participant_id, True)
-        else:
-            # Send next question
-            self._send_next_question(session_id, participant_id)
+        logger.info(f"Processed web response from participant {participant_id} for question {question_id}")
+        
+        # In the web interface, we don't need to send follow-up questions
+        # All questions are presented at once or in groups on the web interface
     
-    def process_continuation_response(self, session_id: str, participant_id: str, 
-                                     response: str) -> None:
+    def complete_preference_collection(self, session_id: str, participant_id: str) -> None:
         """
-        Process a participant's response about continuing with more questions.
+        Mark a participant's preference collection as complete after they finish on the web interface.
         
         Args:
             session_id: The planning session identifier
             participant_id: The participant identifier
-            response: The participant's response text
         """
-        # Normalize response
-        response = response.strip().lower()
+        # Mark preferences as complete
+        self.db.mark_preferences_complete(participant_id)
         
-        # Reset the awaiting continuation flag
-        self.db.set_awaiting_continuation(participant_id, False)
+        # Get participant information
+        participant = self.db.get_participant(participant_id)
+        session = self.db.get_session(session_id)
         
-        if response in ["yes", "y", "sure", "ok", "okay", "continue"]:
-            # They want to continue, send next question
-            self._send_next_question(session_id, participant_id)
-        else:
-            # They want to stop, mark preferences as complete
-            self.db.mark_preferences_complete(participant_id)
+        # Send thank you message
+        message = (
+            f"Thank you for sharing your preferences for {session['event_name']}! "
+            f"Your input will help create a plan that works for everyone. "
+            f"You'll receive a notification when the proposed plan is ready."
+        )
+        
+        # Send via the preferred method
+        method = self.db.get_preferred_comm_method(participant_id)
+        if method == "sms":
+            self.comm_handler._send_sms(participant['contact'], message)
+        elif method == "email":
+            subject = f"Thanks for Your Input on {session['event_name']}"
+            self.comm_handler._send_email(participant['contact'], subject, message)
             
-            # Send thank you message
-            participant = self.db.get_participant(participant_id)
-            message = (
-                "Thank you for sharing your preferences! I'll use this information "
-                "to help create a plan that works for everyone. You'll receive the "
-                "proposed plan once it's ready."
-            )
-            self.comm_handler.send_question(
-                participant_id=participant_id,
-                contact=participant['contact'],
-                method=self.db.get_preferred_comm_method(participant_id),
-                question=message
-            )
+        logger.info(f"Completed preference collection for participant {participant_id} in session {session_id}")
     
     def _send_next_question(self, session_id: str, participant_id: str) -> None:
         """

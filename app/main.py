@@ -77,6 +77,16 @@ class ParticipantFeedbackRequest(BaseModel):
     participant_id: str
     accepted: bool
     feedback: str = None
+    
+class GetQuestionsRequest(BaseModel):
+    session_id: str
+    participant_id: str
+    
+class GetQuestionsResponse(BaseModel):
+    questions: List[Dict[str, Any]]
+    participant_name: str
+    event_name: str
+    organizer_name: str
 
 @app.post("/sessions", response_model=CreateSessionResponse)
 async def create_session(request: CreateSessionRequest, background_tasks: BackgroundTasks):
@@ -142,7 +152,7 @@ async def get_session_status(session_id: str):
 
 @app.post("/preferences/comm-method", response_model=MessageResponse)
 async def set_communication_preference(request: CommunicationPrefRequest):
-    """Set a participant's preferred communication method."""
+    """Set a participant's preferred communication method for notifications."""
     try:
         planner.preference_collector.process_preferred_comm_method(
             session_id=request.session_id,
@@ -156,25 +166,30 @@ async def set_communication_preference(request: CommunicationPrefRequest):
 
 @app.post("/preferences/response", response_model=MessageResponse)
 async def process_preference_response(request: PreferenceRequest):
-    """Process a participant's response to a preference question."""
+    """Process a participant's response to a preference question from the web interface."""
     try:
-        # Check if participant is awaiting continuation decision
-        if planner.db.is_awaiting_continuation(request.participant_id):
-            planner.preference_collector.process_continuation_response(
-                session_id=request.session_id,
-                participant_id=request.participant_id,
-                response=request.response
-            )
-        else:
-            planner.preference_collector.process_question_response(
-                session_id=request.session_id,
-                participant_id=request.participant_id,
-                question_id=request.question_id,
-                response=request.response
-            )
+        planner.preference_collector.process_question_response(
+            session_id=request.session_id,
+            participant_id=request.participant_id,
+            question_id=request.question_id,
+            response=request.response
+        )
         return {"message": "Response processed successfully"}
     except Exception as e:
         logger.error(f"Error processing preference response: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+        
+@app.post("/preferences/complete", response_model=MessageResponse)
+async def complete_preferences(request: CommunicationPrefRequest):
+    """Mark a participant's preference collection as complete."""
+    try:
+        planner.preference_collector.complete_preference_collection(
+            session_id=request.session_id,
+            participant_id=request.participant_id
+        )
+        return {"message": "Preference collection completed successfully"}
+    except Exception as e:
+        logger.error(f"Error completing preference collection: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/plans/generate/{session_id}", response_model=MessageResponse)
@@ -230,37 +245,68 @@ async def record_participant_feedback(request: ParticipantFeedbackRequest):
         logger.error(f"Error recording participant feedback: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/webhook/sms")
-async def sms_webhook(From: str = None, Body: str = None):
-    """Webhook for receiving SMS responses from participants."""
+@app.get("/participant/questions", response_model=GetQuestionsResponse)
+async def get_participant_questions(session_id: str, participant_id: str):
+    """Get all questions for a participant to display in the web interface."""
     try:
-        if not From or not Body:
-            raise HTTPException(status_code=400, detail="Missing From or Body parameters")
+        # Verify session and participant exist
+        session = planner.db.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+            
+        participant = planner.db.get_participant(participant_id)
+        if not participant:
+            raise HTTPException(status_code=404, detail="Participant not found")
         
-        # In a real implementation, you would:
-        # 1. Look up the participant by phone number
-        # 2. Determine what they're responding to (comm preference, question, plan feedback)
-        # 3. Process the response accordingly
+        # Get all base questions from the preference collector
+        all_questions = planner.preference_collector.base_questions
         
-        logger.info(f"Received SMS from {From}: {Body}")
-        return {"status": "received"}
+        # Format questions for the UI
+        formatted_questions = [
+            {
+                "id": f"q{i+1}",  # Generate question IDs
+                "text": question,
+                "order": i+1
+            }
+            for i, question in enumerate(all_questions)
+        ]
+        
+        return {
+            "questions": formatted_questions,
+            "participant_name": participant["name"],
+            "event_name": session["event_name"],
+            "organizer_name": session["organizer_name"]
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error processing SMS webhook: {str(e)}")
+        logger.error(f"Error getting participant questions: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/webhook/email")
-async def email_webhook(from_email: str = None, subject: str = None, body: str = None):
-    """Webhook for receiving email responses from participants."""
+@app.post("/participant/send-reminder", response_model=MessageResponse)
+async def send_reminder(request: CommunicationPrefRequest):
+    """Send a reminder to a participant to complete their preferences."""
     try:
-        if not from_email or not body:
-            raise HTTPException(status_code=400, detail="Missing from_email or body parameters")
+        session_id = request.session_id
+        participant_id = request.participant_id
         
-        # Similar to SMS webhook, in a real implementation you would process this appropriately
+        session = planner.db.get_session(session_id)
+        participant = planner.db.get_participant(participant_id)
         
-        logger.info(f"Received email from {from_email}: {subject}")
-        return {"status": "received"}
+        method = planner.db.get_preferred_comm_method(participant_id) or "sms"
+        
+        planner.comm_handler.send_reminder(
+            session_id=session_id,
+            participant_id=participant_id,
+            participant_name=participant["name"],
+            contact=participant["contact"],
+            method=method,
+            event_name=session["event_name"]
+        )
+        
+        return {"message": "Reminder sent successfully"}
     except Exception as e:
-        logger.error(f"Error processing email webhook: {str(e)}")
+        logger.error(f"Error sending reminder: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 def main():

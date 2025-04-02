@@ -136,7 +136,7 @@ class CorePlanner:
     
     def submit_plan_to_organizer(self, session_id: str) -> None:
         """
-        Send the generated plan to the organizer for approval.
+        Send the generated plan to the organizer for approval via web interface.
         
         Args:
             session_id: The planning session identifier
@@ -145,6 +145,7 @@ class CorePlanner:
         plan = self.db.get_latest_plan(session_id)
         
         self.comm_handler.send_plan_to_organizer(
+            session_id=session_id,
             organizer_name=session['organizer_name'],
             organizer_contact=session['organizer_contact'],
             event_name=session['event_name'],
@@ -173,7 +174,7 @@ class CorePlanner:
             
     def distribute_plan_to_participants(self, session_id: str, plan_id: str) -> None:
         """
-        Send the approved plan to all participants.
+        Send the approved plan to all participants with links to the web interface.
         
         Args:
             session_id: The planning session identifier
@@ -185,6 +186,8 @@ class CorePlanner:
         
         for participant in participants:
             self.comm_handler.send_plan_to_participant(
+                session_id=session_id,
+                participant_id=participant['id'],
                 participant_name=participant['name'],
                 participant_contact=participant['contact'],
                 preferred_method=self.db.get_preferred_comm_method(participant['id']),
@@ -221,6 +224,7 @@ class CorePlanner:
             participant = self.db.get_participant(participant_id)
             
             self.comm_handler.notify_organizer_of_rejection(
+                session_id=session_id,
                 organizer_name=session['organizer_name'],
                 organizer_contact=session['organizer_contact'],
                 participant_name=participant['name'],

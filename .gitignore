@@ -22,9 +22,11 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+venv/
 
 # Database
 data/*.db
+*.db
 
 # Logs
 *.log
@@ -38,3 +40,6 @@ nginx/logs/
 .vscode/
 *.swp
 *.swo
+
+# Agent guidance
+CLAUDE.md
